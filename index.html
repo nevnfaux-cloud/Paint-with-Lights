@@ -1,0 +1,1030 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tap Visual — Sound &amp; Motion Pad</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;overflow:hidden;background:#04030c;font-family:'Space Grotesk',system-ui,sans-serif;color:#fff;touch-action:none;user-select:none;-webkit-user-select:none}
+  canvas{position:fixed;inset:0;width:100%;height:100%;display:block}
+  #hud{position:fixed;top:18px;left:20px;display:flex;align-items:center;gap:14px;pointer-events:none;transition:opacity .6s}
+  #bpm{font-size:40px;font-weight:700;letter-spacing:-1px;line-height:1}
+  #bpmLabel{font-size:11px;letter-spacing:3px;opacity:.6}
+  #beat{width:12px;height:12px;border-radius:50%;background:#fff;box-shadow:0 0 16px #fff;opacity:.2}
+  #controls{position:fixed;top:16px;right:16px;display:flex;gap:8px;transition:opacity .6s}
+  button{font:inherit;font-size:13px;font-weight:600;color:#fff;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.18);padding:9px 14px;border-radius:999px;cursor:pointer;backdrop-filter:blur(6px)}
+  button:hover{background:rgba(255,255,255,.16)}
+  #hint{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);font-size:12px;letter-spacing:1px;opacity:.45;text-align:center;pointer-events:none;white-space:nowrap;transition:opacity .6s}
+  body.clean #hud, body.clean #controls, body.clean #hint{opacity:0}
+  body.clean #controls:hover{opacity:1}
+  #start{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;background:radial-gradient(ellipse at 50% 60%,#3a0f5c 0%,#04030c 70%);z-index:10;cursor:pointer;text-align:center;padding:24px}
+  #start h1{font-size:clamp(36px,7vw,84px);font-weight:700;letter-spacing:-2px;line-height:.95;background:linear-gradient(90deg,#00e5ff,#ff2bd6,#ff8a00);-webkit-background-clip:text;background-clip:text;color:transparent}
+  #start p{opacity:.7;max-width:480px;line-height:1.5;font-size:15px}
+  #start .go{margin-top:10px;font-size:15px;padding:14px 28px;background:#fff;color:#04030c;border:none;box-shadow:0 0 30px rgba(255,43,214,.6)}
+  #controls{flex-wrap:wrap;justify-content:flex-end;max-width:calc(100vw - 220px)}
+  .seg{display:flex;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.18);border-radius:999px;padding:3px;backdrop-filter:blur(6px)}
+  .seg button{border:none;background:transparent;padding:6px 12px;backdrop-filter:none}
+  .seg button.on{background:#fff;color:#04030c}
+  #geoSel{font:inherit;font-size:13px;font-weight:600;color:#fff;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.18);padding:8px 12px;border-radius:999px;cursor:pointer;outline:none}
+  #geoSel option{color:#04030c}
+  .hide{display:none!important}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="hud">
+  <div><div id="bpm">—</div><div id="bpmLabel">BPM · TAP TEMPO</div></div>
+  <div id="beat"></div>
+</div>
+<div id="controls">
+  <div class="seg" title="Shift+M untuk ganti mode">
+    <button id="mFull" class="on">Full Graphic</button>
+    <button id="mMono">Monographic</button>
+    <button id="mSpiral">Spiral</button>
+  </div>
+  <select id="geoSel" class="hide" title="Pilih geometri ( [ dan ] )"></select>
+  <div class="seg" title="Shift+D untuk ganti kepadatan visual">
+    <button id="dCalm" class="on">Tenang</button>
+    <button id="dBusy">Ramai</button>
+  </div>
+  <button id="hueBtn" title="Geser semua warna (Spasi)">Geser warna</button>
+  <button id="cleanBtn" title="Sembunyikan teks (H dengan Shift)">Mode bersih</button>
+  <button id="fsBtn" title="Layar penuh (Shift+F)">Layar penuh</button>
+</div>
+<div id="hint">A–Z &amp; 1–8 / tap layar · Cahaya penuh: A F M B O P N 7 8 C V · Tahan 1–8, Z, X, C, V = nada panjang · Shift+M = mode · [ ] = geometri · Spasi = geser warna · Shift+F = layar penuh</div>
+
+<div id="start">
+  <h1>Tap.<br>Paint with light.</h1>
+  <p>26 tombol, 26 permainan cahaya. Setiap huruf (atau tap di layar) punya bentuk dan warna sendiri. Mainkan beruntun dan semuanya bertumpuk jadi pertunjukan cahaya. Tahan tombol 1–8, Z, X, C, V untuk nada panjang. Ketuk dengan ritme yang konsisten, maka gerakannya ikut tempo-mu.</p>
+  <button class="go">Mulai ▶</button>
+</div>
+
+<script>
+(() => {
+/* ================= Canvas ================= */
+const cv = document.getElementById('c');
+const g = cv.getContext('2d');
+let W=0, H=0, DPR=1, MIN=0, DIAG=0;
+function resize(){
+  DPR = Math.min(window.devicePixelRatio||1, 2);
+  W = innerWidth; H = innerHeight; MIN = Math.min(W,H); DIAG = Math.hypot(W,H);
+  cv.width = W*DPR; cv.height = H*DPR; g.setTransform(DPR,0,0,DPR,0,0);
+  g.fillStyle = '#04030c'; g.fillRect(0,0,W,H);
+}
+addEventListener('resize', resize); resize();
+
+/* ================= Helpers ================= */
+const rnd = (a,b) => a + Math.random()*(b-a);
+const pick = a => a[Math.floor(Math.random()*a.length)];
+const clamp = (v,a,b) => Math.max(a, Math.min(b,v));
+const ease = p => 1 - Math.pow(1-p, 3);
+const easeIO = p => p<.5 ? 4*p*p*p : 1 - Math.pow(-2*p+2,3)/2;
+const hue = h => ((h%360)+360)%360;
+const HS = (h,l=60,a=1) => `hsla(${hue(h).toFixed(1)},100%,${l}%,${a<0?0:a})`;
+// fade-in cepat, fade-out halus
+let INT = 1; // turun otomatis saat banyak efek bertumpuk, supaya tidak jadi putih total
+const PLATEAU = .42; // efek yang ditahan dibekukan di titik ini (terang penuh)
+const envA = (p, inn=.12) => INT * (p<inn ? p/inn : p<PLATEAU ? 1 : Math.pow(Math.max(0,1-(p-PLATEAU)/(1-PLATEAU)), 1.4));
+function hGrad(x0,y0,x1,y1,hues,l=60,a=1){
+  const gr = g.createLinearGradient(x0,y0,x1,y1);
+  hues.forEach((h,i)=>gr.addColorStop(i/(hues.length-1), HS(h,l,a)));
+  return gr;
+}
+// garis neon: 3 lapis (halo lebar, glow, inti)
+function glow(style, w, a, core=true){
+  g.strokeStyle = style; g.lineCap = 'round'; g.lineJoin = 'round';
+  g.globalAlpha = a*0.09; g.lineWidth = w*7; g.stroke();
+  g.globalAlpha = a*0.3;  g.lineWidth = w*2.6; g.stroke();
+  g.globalAlpha = a;      g.lineWidth = w; g.stroke();
+  if (core){ g.strokeStyle = 'rgba(255,255,255,1)'; g.globalAlpha = a*0.45; g.lineWidth = Math.max(.6, w*0.35); g.stroke(); }
+  g.globalAlpha = 1;
+}
+function dot(x,y,r,h,a,l=62){
+  g.fillStyle = HS(h,l,a*0.18); g.beginPath(); g.arc(x,y,r*3,0,7); g.fill();
+  g.fillStyle = HS(h,l+12,a); g.beginPath(); g.arc(x,y,r,0,7); g.fill();
+}
+
+/* ================= Audio — Disco Remix ================= */
+let AC=null, master=null, pump=null, kickBus=null, verbSend=null, delaySend=null, noiseBuf=null;
+const T = () => AC.currentTime + (window.__sched||0);
+const mtof = m => 440*Math.pow(2,(m-69)/12);
+const eighth = () => bpm ? 30/bpm : 0.25;
+function makeIR(sec){
+  const n = Math.floor(AC.sampleRate*sec), b = AC.createBuffer(2, n, AC.sampleRate);
+  for (let c=0;c<2;c++){ const d=b.getChannelData(c); for (let i=0;i<n;i++) d[i]=(Math.random()*2-1)*Math.pow(1-i/n,3.2); }
+  return b;
+}
+function initAudio(ov){
+  if (AC && !ov) return;
+  AC = ov || new (window.AudioContext||window.webkitAudioContext)();
+  const comp = AC.createDynamicsCompressor(); comp.threshold.value=-12; comp.ratio.value=4; comp.attack.value=.004; comp.release.value=.16;
+  const out = AC.createGain(); out.gain.value=.85; comp.connect(out); out.connect(AC.destination);
+  pump = AC.createGain(); pump.connect(comp);                 // semua selain kick "dipompa" oleh kick
+  master = AC.createGain(); master.gain.value=.8; master.connect(pump);
+  kickBus = AC.createGain(); kickBus.connect(comp);
+  verbSend = AC.createGain(); const conv = AC.createConvolver(); conv.buffer = makeIR(2.2);
+  const vw = AC.createGain(); vw.gain.value=.28; verbSend.connect(conv); conv.connect(vw); vw.connect(pump);
+  delaySend = AC.createGain(); const dl = AC.createDelay(1); dl.delayTime.value=.375;
+  const fb = AC.createGain(); fb.gain.value=.32; const hp = AC.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=600;
+  const dw = AC.createGain(); dw.gain.value=.2;
+  delaySend.connect(dl); dl.connect(hp); hp.connect(fb); fb.connect(dl); hp.connect(dw); dw.connect(pump);
+  noiseBuf = AC.createBuffer(1, AC.sampleRate, AC.sampleRate);
+  const d = noiseBuf.getChannelData(0); for (let i=0;i<d.length;i++) d[i]=Math.random()*2-1;
+}
+function envGain(t, a, peak, dur){
+  const gn = AC.createGain();
+  gn.gain.setValueAtTime(.0001,t); gn.gain.exponentialRampToValueAtTime(peak,t+a); gn.gain.exponentialRampToValueAtTime(.0001,t+dur);
+  return gn;
+}
+function route(node, dest, verb, delay){
+  node.connect(dest||master);
+  if (verb){ const s=AC.createGain(); s.gain.value=verb; node.connect(s); s.connect(verbSend); }
+  if (delay){ const s=AC.createGain(); s.gain.value=delay; node.connect(s); s.connect(delaySend); }
+}
+// satu suara oscilator dengan filter ber-envelope
+function voice({type='sawtooth', f, f2=null, glide=.1, dur=.3, peak=.3, a=.005, at=0, detune=0,
+                ftype='lowpass', filt=null, filtEnd=null, q=1, verb=0, delay=0, dest=null}){
+  const t = T()+at, o = AC.createOscillator(); o.type=type; o.detune.value=detune;
+  o.frequency.setValueAtTime(f,t); if (f2) o.frequency.exponentialRampToValueAtTime(f2, t+glide);
+  let n = o;
+  if (filt){ const fl=AC.createBiquadFilter(); fl.type=ftype; fl.Q.value=q; fl.frequency.setValueAtTime(filt,t);
+    if (filtEnd) fl.frequency.exponentialRampToValueAtTime(filtEnd, t+dur*.8); o.connect(fl); n=fl; }
+  const gn = envGain(t,a,peak,dur); n.connect(gn); route(gn, dest, verb, delay);
+  o.start(t); o.stop(t+dur+.05);
+}
+function noiseHit({dur=.1, peak=.3, ftype='highpass', freq=6000, freq2=null, q=1, at=0, a=.002, verb=0, delay=0, dest=null}){
+  const t = T()+at, s = AC.createBufferSource(); s.buffer=noiseBuf;
+  const fl = AC.createBiquadFilter(); fl.type=ftype; fl.Q.value=q; fl.frequency.setValueAtTime(freq,t);
+  if (freq2) fl.frequency.exponentialRampToValueAtTime(freq2, t+dur);
+  const gn = envGain(t,a,peak,dur); s.connect(fl); fl.connect(gn); route(gn, dest, verb, delay);
+  s.start(t); s.stop(t+dur+.05);
+}
+// hi-hat metalik ala drum machine 70-80an: 6 square tidak harmonis
+function metal(dur, peak, verb=0){
+  const t = T(), bp = AC.createBiquadFilter(); bp.type='bandpass'; bp.frequency.value=10000; bp.Q.value=.8;
+  const hp = AC.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=7000;
+  const gn = envGain(t,.001,peak,dur); bp.connect(hp); hp.connect(gn); route(gn, null, verb, 0);
+  [2,3,4.16,5.43,6.79,8.21].forEach(r=>{ const o=AC.createOscillator(); o.type='square'; o.frequency.value=40*r*1.3; o.connect(bp); o.start(t); o.stop(t+dur+.05); });
+}
+// Rhodes: FM sine (tine) dengan sedikit tremolo
+function rhodes(m, at=0, peak=.11, dur=1.6){
+  const t=T()+at, f=mtof(m), c=AC.createOscillator(), mod=AC.createOscillator(), mg=AC.createGain();
+  c.type='sine'; mod.type='sine'; c.frequency.value=f; mod.frequency.value=f;
+  mg.gain.setValueAtTime(f*2.2,t); mg.gain.exponentialRampToValueAtTime(f*.08,t+.35);
+  mod.connect(mg); mg.connect(c.frequency);
+  const gn=envGain(t,.004,peak,dur); c.connect(gn); route(gn,null,.45,.15);
+  c.start(t); mod.start(t); c.stop(t+dur+.05); mod.stop(t+dur+.05);
+}
+function strings(notes, dur=2.4, peak=.035){
+  notes.forEach(m=>[-9,0,9].forEach(dt=>voice({type:'sawtooth', f:mtof(m), detune:dt, dur, peak, a:.4, filt:2600, filtEnd:1400, verb:.6})));
+}
+function kickPump(){
+  const t=T(); pump.gain.cancelScheduledValues(t);
+  pump.gain.setValueAtTime(1,t); pump.gain.linearRampToValueAtTime(.42,t+.012); pump.gain.linearRampToValueAtTime(1,t+.3);
+}
+const CLAV = [57,60,62,64,67,69,72,74,76,79];            // A minor pentatonik
+const BASS_ROOT = {0:33, 2:38, 4:40};                    // A1, D2, E2
+const CHORDS = {4:[57,60,64,67], 7:[62,65,69,72,76], 0:[57,60,64,67,71], 3:[53,57,60,64,69]}; // Am7, Dm9, Am9, Fmaj7
+/* ---- Nada panjang (ditahan): mengembalikan fungsi release ---- */
+function makeRelease(gn, t0, minDur, rel, stops){
+  let done = false;
+  return () => { if (done) return; done = true;
+    const t2 = Math.max(T(), t0+minDur);
+    gn.gain.cancelScheduledValues(t2); gn.gain.setTargetAtTime(.0001, t2, rel/4);
+    stops.forEach(o=>o.stop(t2+rel*1.8)); };
+}
+function stringsHold(notes){                       // string disco: swell, bertahan, vibrato
+  const t=T(), gn=AC.createGain(); gn.gain.setValueAtTime(.0001,t); gn.gain.exponentialRampToValueAtTime(1,t+.45);
+  const lp=AC.createBiquadFilter(); lp.type='lowpass'; lp.Q.value=.7; lp.frequency.setValueAtTime(1200,t); lp.frequency.linearRampToValueAtTime(3200,t+1.6);
+  lp.connect(gn); route(gn,null,.6,0);
+  const os=[];
+  notes.forEach(m=>[-10,0,10].forEach(dt=>{ const o=AC.createOscillator(); o.type='sawtooth'; o.frequency.value=mtof(m); o.detune.value=dt;
+    const og=AC.createGain(); og.gain.value=.035; o.connect(og); og.connect(lp); o.start(t); os.push(o); }));
+  const lfo=AC.createOscillator(), lg=AC.createGain(); lfo.frequency.value=5; lg.gain.value=7; lfo.connect(lg);
+  os.forEach(o=>lg.connect(o.detune)); lfo.start(t); os.push(lfo);
+  return makeRelease(gn,t,.9,.9,os);
+}
+function rhodesHold(notes){                        // Rhodes: tine FM, turun ke sustain, tremolo
+  const t=T(), gn=AC.createGain(); gn.gain.setValueAtTime(.0001,t); gn.gain.exponentialRampToValueAtTime(1,t+.005); gn.gain.setTargetAtTime(.5,t+.08,.6);
+  const trem=AC.createGain(); trem.gain.value=.8; const lfo=AC.createOscillator(), lg=AC.createGain(); lfo.frequency.value=4.6; lg.gain.value=.2;
+  lfo.connect(lg); lg.connect(trem.gain); gn.connect(trem); route(trem,null,.45,.15);
+  const os=[lfo]; lfo.start(t);
+  notes.forEach((m,i)=>{ const ti=t+i*.012, f=mtof(m), c=AC.createOscillator(), mod=AC.createOscillator(), mg=AC.createGain(), ng=AC.createGain();
+    c.frequency.value=f; mod.frequency.value=f; mg.gain.setValueAtTime(f*2.2,ti); mg.gain.exponentialRampToValueAtTime(f*.08,ti+.35);
+    mod.connect(mg); mg.connect(c.frequency); ng.gain.value=.11; c.connect(ng); ng.connect(gn); c.start(ti); mod.start(ti); os.push(c,mod); });
+  return makeRelease(gn,t,.45,.4,os);
+}
+function leadHold(m){                              // synth lead disco: 2 saw detune + sub, vibrato tertunda
+  const t=T(), f=mtof(m), gn=AC.createGain(); gn.gain.setValueAtTime(.0001,t); gn.gain.exponentialRampToValueAtTime(.24,t+.02);
+  const lp=AC.createBiquadFilter(); lp.type='lowpass'; lp.Q.value=1.5; lp.frequency.setValueAtTime(5000,t); lp.frequency.setTargetAtTime(2600,t+.02,.25);
+  lp.connect(gn); route(gn,null,.35,.22);
+  const os=[];
+  [['sawtooth',f,-7,.5],['sawtooth',f,7,.5],['square',f/2,0,.28]].forEach(([ty,fr,dt,v])=>{ const o=AC.createOscillator(), og=AC.createGain();
+    o.type=ty; o.frequency.value=fr; o.detune.value=dt; og.gain.value=v; o.connect(og); og.connect(lp); o.start(t); os.push(o); });
+  const lfo=AC.createOscillator(), lg=AC.createGain(); lfo.frequency.value=5.5; lg.gain.setValueAtTime(0,t); lg.gain.linearRampToValueAtTime(14,t+.6);
+  lfo.connect(lg); os.forEach(o=>lg.connect(o.detune)); lfo.start(t); os.push(lfo);
+  return makeRelease(gn,t,.16,.3,os);
+}
+const LEAD = [69,71,72,74,76,77,79,81];            // A minor: A4 → A5
+const SOUNDS = {
+  lead:n=>leadHold(LEAD[n]),
+  kick:()=>{ kickPump();
+    voice({type:'sine', f:150, f2:46, glide:.11, dur:.42, peak:1, a:.002, dest:kickBus});
+    noiseHit({dur:.018, peak:.35, freq:2500, dest:kickBus}); },
+  snare:()=>{ noiseHit({dur:.2, peak:.42, ftype:'bandpass', freq:2300, q:.7, verb:.45});
+    voice({type:'triangle', f:200, f2:165, glide:.06, dur:.11, peak:.25}); },
+  hat:()=>metal(.05,.2),
+  openhat:()=>metal(.33,.15,.15),
+  clap:()=>{ [0,.011,.022].forEach(d=>noiseHit({at:d, dur:.025, peak:.5, ftype:'bandpass', freq:1400, q:1.4}));
+    noiseHit({at:.03, dur:.24, peak:.32, ftype:'bandpass', freq:1300, q:1.1, verb:.75}); },
+  tom:()=>{ voice({type:'sine', f:720, f2:110, glide:.3, dur:.38, peak:.5, verb:.35, delay:.3});      // syndrum "pew"
+    voice({type:'triangle', f:740, f2:115, glide:.3, dur:.3, peak:.18}); },
+  bass:n=>{ const r=BASS_ROOT[n]??33, e=eighth();                                                     // bass oktaf disco
+    [0,12,0,12].forEach((o,i)=>{ voice({type:'sawtooth', f:mtof(r+o), at:i*e, dur:e*.9, peak:.42, filt:1100, filtEnd:240, q:7});
+      voice({type:'square', f:mtof(r+o-12), at:i*e, dur:e*.85, peak:.12, filt:400}); }); },
+  pluck:n=>{ const f=mtof(CLAV[n]);                                                                   // clav/gitar funky ber-wah
+    voice({type:'square', f, dur:.24, peak:.22, ftype:'bandpass', filt:2800, filtEnd:700, q:3.5, delay:.28});
+    voice({type:'sawtooth', f, detune:7, dur:.2, peak:.12, ftype:'bandpass', filt:3200, filtEnd:800, q:3}); },
+  bell:n=>rhodesHold(CHORDS[n]||CHORDS[4]),                                                          // akor Rhodes (bisa ditahan)
+  pad:n=>stringsHold(CHORDS[n]||CHORDS[0]),                                                           // string swell (bisa ditahan)
+  zap:()=>{ voice({type:'square', f:1900, f2:160, glide:.22, dur:.26, peak:.13, delay:.55});         // laser pew-pew
+    voice({type:'square', f:2500, f2:210, glide:.2, dur:.22, peak:.1, at:.1, delay:.4}); },
+  rise:()=>{ const sc=[57,59,60,62,64,65,67,69,71,72,74,76,77,79,81];                                // string run naik
+    sc.forEach((m,i)=>voice({type:'sawtooth', f:mtof(m), at:i*.034, dur:.16, peak:.075, filt:4200, verb:.5}));
+    noiseHit({dur:1, peak:.12, ftype:'bandpass', freq:400, freq2:9000, q:2, a:.6, verb:.3}); },
+  blip:()=>{ [45,57,60,64,69].forEach(m=>voice({type:'sawtooth', f:mtof(m), dur:.32, peak:.075, filt:4200, filtEnd:700, a:.004, verb:.45}));
+    voice({type:'square', f:mtof(81), dur:.12, peak:.05, filt:5000, delay:.3}); },                    // stab orkestra
+};
+
+/* ================= Tempo ================= */
+let taps=[], bpm=0, speed=1, targetSpeed=1, beatPhase=0, beatPulse=0;
+function registerTap(now){
+  const last = taps[taps.length-1];
+  if (last && now-last < 90) return;
+  if (last && now-last > 2000) taps=[];
+  taps.push(now); if (taps.length>9) taps.shift();
+  if (taps.length>=3){
+    // lipat tiap jarak ketukan ke rentang 70–190 BPM dulu, baru ambil median
+    const bs=[]; for (let i=1;i<taps.length;i++){ let v=60000/(taps[i]-taps[i-1]); while (v<70) v*=2; while (v>190) v/=2; bs.push(v); }
+    bs.sort((a,b)=>a-b);
+    const b = bs[Math.floor(bs.length/2)];
+    bpm = bpm ? bpm*.5+b*.5 : b;
+    targetSpeed = clamp(bpm/110, .45, 2.6);
+    beatPhase = 0;
+  }
+}
+
+/* ================= Light effects ================= */
+// t = waktu animasi (selalu jalan), pt = progres hidup (berhenti di PLATEAU selama tombol ditahan)
+class FX { constructor(life){ this.t=0; this.pt=0; this.life=life; this.held=false; } get p(){ return Math.min(1,this.pt/this.life); } }
+
+// 1. Gelombang sutra berlapis (ref: neon silk waves)
+class Silk extends FX {
+  constructor(h,x,y){ super(2.1); Object.assign(this,{h, cy:y??rnd(.35,.65)*H, A:rnd(.07,.13)*H, k:rnd(1.2,2.4)*Math.PI*2/W, dir:pick([-1,1]), N:16, sp:rnd(4,7), ph:rnd(0,6)}); }
+  draw(){
+    const p=this.p, a=envA(p,.15), e=ease(Math.min(1,p*1.6));
+    const st = hGrad(0,0,W,0,[this.h,this.h+35,this.h+75,this.h+20],60);
+    for (let i=0;i<this.N;i++){
+      const off=(i-this.N/2)*this.sp*(1+e*.6);
+      g.beginPath();
+      for (let x=-20;x<=W+20;x+=10){
+        const y = this.cy+off + Math.sin(x*this.k + this.dir*this.t*2.2 + this.ph + i*.08)*this.A*e*(.75+.25*Math.cos(i*.45));
+        x===-20 ? g.moveTo(x,y) : g.lineTo(x,y);
+      }
+      if (i===Math.floor(this.N/2) || i===2) glow(st, 2.4, a);
+      else { g.strokeStyle=st; g.lineWidth=1; g.globalAlpha=a*.55; g.stroke(); g.globalAlpha=1; }
+    }
+  }
+}
+// 2. Terowongan poligon menyorot ke arah penonton (ref: neon triangle tunnel)
+class Tunnel extends FX {
+  constructor(h,x,y,sides=3){ super(1.8); Object.assign(this,{h, cx:x??rnd(.35,.65)*W, cy:y??rnd(.38,.62)*H, sides, rot:sides===3?-Math.PI/2:Math.PI/4, dr:pick([-1,1])*rnd(.1,.35), L:11}); }
+  draw(){
+    const p=this.p, a=envA(p,.06), big=Math.max(W,H)*1.5;
+    for (let j=0;j<this.L;j++){
+      const z = p*1.7 - j*.11; if (z<=0) continue;
+      const r = MIN*.025*Math.exp(z*3.1); if (r>big) continue;
+      const la = a*Math.min(1,z*5)*(1-r/big);
+      const ang = this.rot + this.dr*z;
+      g.beginPath();
+      for (let s=0;s<=this.sides;s++){ const t=ang+s/this.sides*Math.PI*2; g.lineTo(this.cx+Math.cos(t)*r, this.cy+Math.sin(t)*r); }
+      glow(HS(j%2?this.h:this.h+65, 60), 2+r*.01, la);
+    }
+  }
+}
+// 3. Serat cahaya memancar dari titik (ref: light streak burst)
+class Streaks extends FX {
+  constructor(h,x,y){ super(1.8); this.h=h; const cx=this.cx=x??rnd(.3,.7)*W, cy=this.cy=y??rnd(.35,.65)*H;
+    this.s=[...Array(24)].map((_,i)=>{ const sd=i%2?1:-1, ey=cy+rnd(-.6,.6)*H;
+      return {P:[[cx,cy],[cx+sd*rnd(.04,.18)*W, cy+rnd(-.03,.03)*H],[cx+sd*rnd(.25,.45)*W, cy+(ey-cy)*rnd(.3,.9)],[sd>0?W+60:-60, ey]], hh:h+rnd(-70,70), w:rnd(1,3.2)}; });
+    this.parts=[...Array(60)].map(()=>({a:rnd(0,6.28), v:rnd(.1,.6)*MIN, r:rnd(1,2.6), hh:h+rnd(-60,60)}));
+  }
+  draw(){
+    const p=this.p, a=envA(p,.05), e=ease(Math.min(1,p*1.35));
+    for (const s of this.s){
+      const P=s.P; g.beginPath();
+      for (let k=0;k<=36;k++){ const u=k/36*e, m=1-u;
+        const x=m*m*m*P[0][0]+3*m*m*u*P[1][0]+3*m*u*u*P[2][0]+u*u*u*P[3][0];
+        const y=m*m*m*P[0][1]+3*m*m*u*P[1][1]+3*m*u*u*P[2][1]+u*u*u*P[3][1];
+        k ? g.lineTo(x,y) : g.moveTo(x,y); }
+      glow(HS(s.hh,60), s.w, a);
+    }
+    for (const q of this.parts) dot(this.cx+Math.cos(q.a)*q.v*e, this.cy+Math.sin(q.a)*q.v*e, q.r, q.hh, a*.9);
+    const fr = MIN*.14*(1+e*.5), gr = g.createRadialGradient(this.cx,this.cy,0,this.cx,this.cy,fr);
+    gr.addColorStop(0, `rgba(255,255,255,${.9*a*(1-p)})`); gr.addColorStop(.25, HS(this.h,60,.5*a*(1-p))); gr.addColorStop(1, HS(this.h,60,0));
+    g.fillStyle=gr; g.beginPath(); g.arc(this.cx,this.cy,fr,0,7); g.fill();
+  }
+}
+// 4. Punggung bukit spektrum + percikan berujung titik (ref: spectral ridges)
+class Ridge extends FX {
+  constructor(h,x,y){ super(2.3); this.h=h; this.base=y!=null?Math.min(H*.92,y+H*.22):H*.8;
+    this.pk=[...Array(3)].map((_,i)=>({c:(x!=null&&i===0)?x:rnd(.1,.9)*W, w:rnd(.06,.13)*W, a:rnd(.22,.42)*H}));
+    this.sp=[...Array(22)].map(()=>{ const pk=pick(this.pk); return {x:pk.c+rnd(-1.4,1.4)*pk.w, h:rnd(.05,.25)*H}; });
+  }
+  envAt(x){ let e=0; for (const k of this.pk) e+=k.a*Math.exp(-Math.pow((x-k.c)/k.w,2)); return e; }
+  draw(){
+    const p=this.p, a=envA(p,.12), e=ease(Math.min(1,p*1.5)), N=22;
+    const st = hGrad(0,0,W,0,[this.h,this.h+60,this.h+120,this.h+180,this.h+240],60);
+    for (let i=N-1;i>=0;i--){
+      const k=1-i*.035; g.beginPath();
+      for (let x=-10;x<=W+10;x+=8){ const y=this.base - this.envAt(x)*e*k + i*2.6 + Math.sin(x*.012+this.t*2+i*.25)*5*e; x===-10?g.moveTo(x,y):g.lineTo(x,y); }
+      if (i===0) glow(st,2.2,a); else { g.strokeStyle=st; g.lineWidth=1; g.globalAlpha=a*(.25+.6*(1-i/N)); g.stroke(); g.globalAlpha=1; }
+    }
+    for (const s of this.sp){
+      const y0=this.base-this.envAt(s.x)*e, y1=y0-s.h*e, hh=this.h+s.x/W*240;
+      g.beginPath(); g.moveTo(s.x,y0); g.lineTo(s.x,y1); glow(HS(hh,62),1,a*.8,false); dot(s.x,y1,2.2,hh,a);
+    }
+  }
+}
+// 5. Badai piksel dengan kedalaman (ref: voxel blur)
+class Pixels extends FX {
+  constructor(h,x,y){ super(1.9); this.h=h; const cx=x??W/2, cy=y??H*.75;
+    this.c=[...Array(90)].map(()=>{ const z=rnd(.12,1); return {x:cx+rnd(-1,1)*W*.5*(.5+z*.6), y:cy+rnd(-.08,.12)*H, z, rise:rnd(.15,.55)*H, hh:h+rnd(-50,50)+z*40, s:3+z*16}; }).sort((a,b)=>a.z-b.z);
+  }
+  draw(){
+    const p=this.p, a=envA(p,.1), e=easeIO(p);
+    for (const q of this.c){
+      const y=q.y-q.rise*e*(.4+q.z), s=q.s, la=a*(.2+.8*q.z);
+      g.fillStyle=HS(q.hh,55,la*.14); g.fillRect(q.x-s*1.3,y-s*1.3,s*2.6,s*2.6);
+      g.fillStyle=HS(q.hh,58,la*.85); g.fillRect(q.x-s/2,y-s/2,s,s);
+      g.fillStyle=HS(q.hh,85,la*.7); g.fillRect(q.x-s/2,y-s/2,s,Math.max(1,s*.18));
+    }
+  }
+}
+// 6. Garis gelombang putus-putus yang berjalan (ref: dashed waveform)
+class Dashes extends FX {
+  constructor(h,x,y){ super(1.4); Object.assign(this,{h, y:y??H*.5, n:46, dir:pick([1,-1])}); }
+  draw(){
+    const p=this.p, a=envA(p,.08), x0=W*.1, x1=W*.9, step=(x1-x0)/(this.n-1);
+    const c = this.dir>0 ? x0+(x1-x0)*easeIO(p) : x1-(x1-x0)*easeIO(p);
+    for (let i=0;i<this.n;i++){
+      const x=x0+i*step, d=(x-c)/(W*.13), gs=Math.exp(-d*d);
+      const hgt = 3 + gs*H*.13*(.45+.55*Math.abs(Math.sin(i*1.7+this.t*11)));
+      const bw = step*.42, hh=this.h+i*1.4, la=a*(.3+.7*gs);
+      g.fillStyle=HS(hh,60,la*.18); g.fillRect(x-bw*1.4,this.y-hgt/2-3,bw*2.8,hgt+6);
+      g.fillStyle=HS(hh,78,la); g.fillRect(x-bw/2,this.y-hgt/2,bw,hgt);
+    }
+  }
+}
+// 7. Cincin konsentris
+class Rings extends FX {
+  constructor(h,x,y){ super(1.5); Object.assign(this,{h, x:x??rnd(.25,.75)*W, y:y??rnd(.25,.75)*H}); }
+  draw(){
+    for (let j=0;j<5;j++){
+      const q=(this.p-j*.09)/.64; if (q<=0||q>=1) continue;
+      g.beginPath(); g.arc(this.x,this.y,ease(q)*MIN*.48,0,7);
+      glow(HS(this.h+j*22,60), 3*(1-q)+.8, (1-q)*.95);
+    }
+  }
+}
+// 8. Tirai aurora
+class Aurora extends FX {
+  constructor(h){ super(2.6); this.h=h;
+    this.L=[...Array(3)].map((_,i)=>({hh:h+i*38, y0:rnd(.08,.38)*H, amp:rnd(.04,.1)*H, k:rnd(1,2.4)*Math.PI*2/W, ph:rnd(0,6), d:rnd(.25,.45)*H, sp:rnd(.6,1.4)}));
+    this.str=[...Array(Math.ceil(W/12)+2)].map(()=>rnd(.3,1));
+  }
+  draw(){
+    const a=envA(this.p,.22);
+    for (const L of this.L){
+      const yAt = x => L.y0 + Math.sin(x*L.k + L.ph + this.t*L.sp)*L.amp + Math.sin(x*L.k*2.7 + this.t)*L.amp*.3;
+      const gr = g.createLinearGradient(0,L.y0-L.amp,0,L.y0+L.d);
+      gr.addColorStop(0, HS(L.hh,62,.2*a)); gr.addColorStop(1, HS(L.hh+30,55,0));
+      g.fillStyle=gr; g.beginPath(); g.moveTo(0,yAt(0));
+      for (let x=0;x<=W;x+=12) g.lineTo(x,yAt(x));
+      g.lineTo(W,L.y0+L.d+L.amp); g.lineTo(0,L.y0+L.d+L.amp); g.closePath(); g.fill();
+      g.lineWidth=1.2;
+      for (let i=0,x=0;x<=W;x+=12,i++){ const y=yAt(x); g.strokeStyle=HS(L.hh,70,a*.13*this.str[i]); g.beginPath(); g.moveTo(x,y); g.lineTo(x,y+L.d*this.str[i]); g.stroke(); }
+      g.beginPath(); for (let x=0;x<=W;x+=12) x?g.lineTo(x,yAt(x)):g.moveTo(x,yAt(x));
+      glow(HS(L.hh,65),1.6,a*.8,false);
+    }
+  }
+}
+// 9. Sinar radial
+class Rays extends FX {
+  constructor(h,x,y){ super(1.25); Object.assign(this,{h, x:x??rnd(.25,.75)*W, y:y??rnd(.3,.7)*H, n:44, r0:rnd(0,6), dir:pick([-1,1])}); }
+  draw(){
+    const p=this.p, a=envA(p,.05), L=DIAG*ease(p);
+    for (let i=0;i<this.n;i++){
+      const an=this.r0+i/this.n*Math.PI*2+this.dir*this.t*.7, len=L*(.55+.45*((i*7)%5)/4);
+      g.beginPath(); g.moveTo(this.x+Math.cos(an)*L*.06, this.y+Math.sin(an)*L*.06); g.lineTo(this.x+Math.cos(an)*len, this.y+Math.sin(an)*len);
+      glow(HS(this.h+(i%2)*55,60), 1.4, a*.85, i%4===0);
+    }
+  }
+}
+// 10. Galaksi spiral partikel
+class Spiral extends FX {
+  constructor(h,x,y){ super(2.1); Object.assign(this,{h, x:x??rnd(.3,.7)*W, y:y??rnd(.35,.65)*H, dir:pick([-1,1]), q:[...Array(170)].map((_,i)=>({arm:i%3, u:Math.random(), j:rnd(-.15,.15)}))}); }
+  draw(){
+    const a=envA(this.p,.1), e=ease(this.p);
+    for (const q of this.q){
+      const an=q.arm*2.094+q.u*5.2+q.j+this.dir*this.t*1.7, r=q.u*MIN*.48*e;
+      dot(this.x+Math.cos(an)*r, this.y+Math.sin(an)*r, 1.2+(1-q.u)*2.6, this.h+q.u*100, a);
+    }
+  }
+}
+// 11. Sapuan laser
+class Lasers extends FX {
+  constructor(h){ super(1.05); this.h=h;
+    const piv=[[0,H+20],[W,H+20],[W/2,-20],[-20,H/2],[W+20,H/2]];
+    this.b=[...Array(6)].map((_,i)=>{ const P=pick(piv); return {P, a0:Math.atan2(H/2-P[1],W/2-P[0])+rnd(-.5,.5), sw:rnd(.3,.9)*pick([-1,1]), hh:h+i*28}; });
+  }
+  draw(){
+    const p=this.p, a=envA(p,.07);
+    for (const b of this.b){
+      const an=b.a0+b.sw*(p-.5), ex=b.P[0]+Math.cos(an)*DIAG*1.2, ey=b.P[1]+Math.sin(an)*DIAG*1.2;
+      g.beginPath(); g.moveTo(b.P[0],b.P[1]); g.lineTo(ex,ey);
+      g.strokeStyle=HS(b.hh,60,.04*a); g.lineWidth=60; g.stroke();
+      glow(HS(b.hh,60),2.6,a);
+    }
+  }
+}
+// 12. Bokeh
+class Bokeh extends FX {
+  constructor(h){ super(2.3); this.h=h; this.b=[...Array(18)].map(()=>({x:rnd(0,W), y:rnd(0,H), r:rnd(.025,.09)*MIN, hh:h+rnd(-45,45), d:rnd(0,.45), vy:rnd(-30,-8)})); }
+  draw(){
+    for (const b of this.b){
+      const q=clamp((this.p-b.d)/(1-b.d),0,1); if (q<=0) continue;
+      const la=envA(q,.25), y=b.y+b.vy*this.t;
+      g.fillStyle=HS(b.hh,60,.3*la); g.beginPath(); g.arc(b.x,y,b.r,0,7); g.fill();
+      g.strokeStyle=HS(b.hh,75,.85*la); g.lineWidth=2; g.stroke();
+    }
+  }
+}
+// 13. Percikan vertikal berkelip (ref: sparkle band)
+class Sparkle extends FX {
+  constructor(h,x,y){ super(1.6); this.h=h; this.cy=y??H*.45; this.s=[...Array(140)].map(()=>({x:rnd(0,W), h:rnd(.02,.2)*H, ph:rnd(0,6), sp:rnd(8,22)})); }
+  draw(){
+    const a=envA(this.p,.1), e=ease(Math.min(1,this.p*2));
+    for (const s of this.s){
+      const f=.35+.65*(.5+.5*Math.sin(this.t*s.sp+s.ph)), hh=this.h+s.x/W*90, hg=s.h*e;
+      g.fillStyle=HS(hh,65,a*f*.85); g.fillRect(s.x-.7,this.cy-hg,1.4,hg*1.2);
+      g.fillStyle=HS(hh,85,a*f); g.fillRect(s.x-1.2,this.cy-hg-1.2,2.4,2.4);
+    }
+  }
+}
+// 14. Pita cahaya yang mengalir
+class Ribbon extends FX {
+  constructor(h,x,y){ super(1.9); Object.assign(this,{h, cy:y??rnd(.3,.7)*H, ph:rnd(0,6), fr:rnd(1.5,3.2), amp:rnd(.12,.24)*H, dir:pick([1,-1])}); }
+  draw(){
+    const a=envA(this.p,.05), head=easeIO(this.p)*1.45, tail=head-.5;
+    for (let j=0;j<10;j++){
+      const off=(j-4.5)*4; g.beginPath(); let first=true;
+      for (let u=Math.max(0,tail); u<=Math.min(1,head); u+=.008){
+        const x=this.dir>0?W*u:W*(1-u), y=this.cy+Math.sin(u*this.fr*Math.PI*2+this.ph+j*.05)*this.amp+off*(1+Math.sin(u*7));
+        first?g.moveTo(x,y):g.lineTo(x,y); first=false;
+      }
+      if (j===5) glow(HS(this.h+j*7,60),2.6,a); else { g.strokeStyle=HS(this.h+j*7,60,a*.6); g.lineWidth=1.1; g.stroke(); }
+    }
+  }
+}
+
+/* ---- Aksen halus untuk mode Tenang (drum & bass tidak memunculkan geometri besar) ---- */
+// kick: denyut cahaya lembut di tengah
+class Pulse extends FX { constructor(h){ super(.55); this.h=h; }
+  draw(){ const a=envA(this.p,.08), r=DIAG*.45*(.8+.2*ease(this.p)), gr=g.createRadialGradient(W/2,H/2,0,W/2,H/2,r);
+    gr.addColorStop(0,HS(this.h,55,.13*a)); gr.addColorStop(1,HS(this.h,55,0)); g.fillStyle=gr; g.fillRect(0,0,W,H); } }
+// hi-hat: beberapa titik kecil
+class Tick extends FX { constructor(h,n=5){ super(.4); this.h=h; this.d=[...Array(n)].map(()=>({x:rnd(.15,.85)*W, y:rnd(.15,.85)*H, r:rnd(1.2,2.6)})); }
+  draw(){ const a=envA(this.p,.05); for (const q of this.d) dot(q.x,q.y,q.r,this.h,a*.8); } }
+// snare / clap / tom: satu cincin tipis
+class Snap extends FX { constructor(h,x,y){ super(.7); Object.assign(this,{h, x:x??rnd(.35,.65)*W, y:y??rnd(.35,.65)*H}); }
+  draw(){ const q=this.p; g.beginPath(); g.arc(this.x,this.y,MIN*(.06+.22*ease(q)),0,7); glow(HS(this.h,62),1.3,(1-q)*.55*INT,false); } }
+// bass: satu garis gelombang tipis di bawah layar
+class Floor extends FX { constructor(h){ super(1.1); Object.assign(this,{h, y:H*rnd(.8,.88), k:rnd(1.5,3)*Math.PI*2/W, ph:rnd(0,6)}); }
+  draw(){ const a=envA(this.p,.08), e=ease(Math.min(1,this.p*2)); g.beginPath();
+    for (let x=0;x<=W;x+=12){ const y=this.y+Math.sin(x*this.k+this.ph+this.t*3)*H*.025*e; x?g.lineTo(x,y):g.moveTo(x,y); }
+    glow(hGrad(0,0,W,0,[this.h,this.h+40,this.h+80]),1.6,a*.7,false); } }
+const ACCENT = { kick:h=>new Pulse(h), hat:h=>new Tick(h,4), openhat:h=>new Tick(h,9), snare:(h,x,y)=>new Snap(h,x,y),
+                 clap:(h,x,y)=>new Snap(h,x,y), tom:(h,x,y)=>new Snap(h,x,y), bass:h=>new Floor(h) };
+const MAX_MAJOR = 3;     // mode Tenang: geometri besar yang boleh tampil bersamaan
+let density = 'calm';
+
+let clockT = 0;
+/* ================= Mode Spiral: mandala yang selalu di tengah ================= */
+// Lapisan dari luar ke dalam. Tiap tombol mengubah warna (hue) / bentuk / energi salah satu lapisan.
+const SHAPES = ['rect','petal','tri','diamond','bar','dot'];
+const M = {
+  C:0, recent:[], realT:0,
+  pulse:0, twist:0, twistT:0, twistKick:0, sym:12, flash:0, holds:[],
+  L:{
+    frame: {hue:225, hueT:225, energy:0, rot:0, spin:.05},
+    pills: {hue:300, hueT:300, energy:0, rot:0, spin:-.12, shape:'bar',    prev:'bar',    mix:1, r0:.66, r1:.88, wf:.32},
+    ticks: {hue:12,  hueT:12,  energy:0, rot:0, spin:.06},
+    mid:   {hue:350, hueT:350, energy:0, rot:0, spin:.08, shape:'rect',   prev:'rect',   mix:1, r0:.42, r1:.8,  wf:.9},
+    inner: {hue:320, hueT:320, energy:0, rot:0, spin:-.15, shape:'petal', prev:'petal',  mix:1, r0:.14, r1:.42, wf:.8},
+    spokes:{hue:25,  hueT:25,  energy:0, rot:0, spin:.1, zap:0},
+    core:  {hue:32,  hueT:32,  energy:0, rot:0, spin:.25, points:12},
+  }
+};
+/* ---- Kecerahan menurut tinggi nada: rendah = redup, tinggi = terang ---- */
+function brightOf(kind, n){
+  switch(kind){
+    case 'kick': return .38;  case 'bass': return .35 + (n|0)*.02;  case 'tom': return .55;
+    case 'snare': return .6;  case 'clap': return .65;  case 'hat': return .85;  case 'openhat': return .8;
+    case 'pluck': return .5 + n*.055;      // 10 nada clav: .50 → 1.0
+    case 'lead':  return .62 + n*.054;     // 8 nada lead: .62 → 1.0
+    case 'bell':  return n===7 ? .65 : .55;
+    case 'pad':   return n===3 ? .45 : .5;
+    case 'zap': return .95;  case 'rise': return .8;  case 'blip': return .9;
+  }
+  return .7;
+}
+/* ---- Intensitas lagu: kepadatan × kecerahan nada beberapa detik terakhir ---- */
+let noteAcc = 0, drive = 0;
+const DRIVE_TAU = 2.5;   // detik
+
+/* ---- Kompleksitas permainan (khusus mode Spiral): makin padat & beragam → makin banyak lapisan ---- */
+const REVEAL = { pills:.1, mid:.22, inner:.42, spokes:.5, core:.6, frame:.72 };
+const smooth01 = x => { x = clamp(x,0,1); return x*x*(3-2*x); };
+const reveal = th => smooth01((M.C - th)/.15);
+// lapisan terlihat bila kompleksitas cukup, atau sesaat setelah tombolnya ditekan
+const visOf = k => Math.max(REVEAL[k]!==undefined ? reveal(REVEAL[k]) : 1, M.L[k].energy*.75);
+function mandalaHit(kind, n, h, br=1, key=''){
+  M.recent.push({t:M.realT, k:key, br});
+  const L = M.L, hit = (k,e=1)=>{ L[k].energy = Math.max(L[k].energy, e*br); };
+  const lay = []; // lapisan yang ikut "ditahan" kalau nada sustain
+  switch(kind){
+    case 'kick':    M.pulse = 1; hit('core'); break;
+    case 'snare':   hit('ticks'); hit('frame',.7); break;
+    case 'clap':    hit('frame'); hit('pills',.8); M.flash = Math.max(M.flash,.5); break;
+    case 'hat':     hit('ticks',.5); break;
+    case 'openhat': hit('ticks',.9); L.ticks.hueT = h; break;
+    case 'tom':     hit('spokes'); L.spokes.rot += .25; break;
+    case 'bass':    hit('inner'); L.core.points = [8,12,16][(n/2)|0] || 12; L.core.hueT = h; break;
+    case 'pluck': {
+      const key = ['inner','mid','pills','inner','mid','pills','inner','mid','pills','mid'][n];
+      const Lk = L[key], sh = SHAPES[n % SHAPES.length];
+      if (Lk.shape !== sh){ Lk.prev = Lk.shape; Lk.shape = sh; Lk.mix = 0; }
+      Lk.hueT = h; hit(key); break; }
+    case 'bell':    L.mid.hueT = h; hit('mid'); lay.push('mid'); break;
+    case 'pad':     L.frame.hueT = h; L.ticks.hueT = h+20; hit('ticks'); lay.push('ticks'); break;
+    case 'lead':    L.spokes.hueT = h; L.core.hueT = h+30; M.twistT = (n-3.5)*.22; hit('spokes'); hit('core',.7); lay.push('spokes','core'); break;
+    case 'zap':     L.spokes.zap = 1; hit('spokes'); break;
+    case 'rise':    M.twistKick = 1; for (const k in L) hit(k,.6); break;
+    case 'blip':    M.sym = M.sym===12 ? 16 : M.sym===16 ? 8 : 12; M.flash = 1; for (const k in L) hit(k,.7); break;
+  }
+  return { held:false, layers:lay, br };
+}
+function updateMandala(dt, rawDt){
+  const L = M.L;
+  M.realT += rawDt;
+  M.recent = M.recent.filter(e=>e.t > M.realT-4);
+  M.holds = M.holds.filter(o=>o.held);
+  // kompleksitas = kepadatan nada (berbobot kecerahan) + keragaman tombol dalam 4 detik terakhir
+  let rate = M.recent.reduce((a,e)=>a+e.br,0)/4;
+  for (const o of M.holds) rate += .5*o.br;
+  const distinct = new Set(M.recent.map(e=>e.k)).size + M.holds.length*.25;
+  const cT = clamp(.55*Math.min(1, rate/6) + .45*Math.min(1, Math.max(0,distinct-2)/11), 0, 1);
+  M.C += (cT - M.C) * Math.min(1, rawDt*(cT > M.C ? .8 : .3));
+  for (const o of M.holds) for (const k of o.layers) L[k].energy = Math.max(L[k].energy, .85*o.br);
+  for (const k in L){
+    const l = L[k];
+    l.energy *= Math.pow(.12, rawDt);
+    let d = ((l.hueT - l.hue)%360+540)%360-180; l.hue += d*Math.min(1, rawDt*4);
+    l.rot += dt*l.spin*(1 + l.energy*2.5);
+    if (l.mix !== undefined) l.mix = Math.min(1, l.mix + rawDt*3);
+  }
+  L.spokes.zap *= Math.pow(.05, rawDt);
+  M.pulse *= Math.pow(.02, rawDt);
+  M.flash *= Math.pow(.05, rawDt);
+  M.twistKick *= Math.pow(.3, rawDt);
+  M.twistT *= Math.pow(.7, rawDt);              // pelintiran perlahan kembali lurus
+  M.twist += ((M.twistT + Math.sin(M.twistKick*Math.PI)*1.4) - M.twist) * Math.min(1, rawDt*3);
+}
+function petalShape(shape, r0, r1, w, h, a){
+  const len = r1-r0;
+  g.beginPath();
+  switch(shape){
+    case 'rect':    g.rect(r0,-w/2,len,w); break;
+    case 'petal':   g.ellipse(r0+len/2,0,len/2,w/2,0,0,7); break;
+    case 'tri':     g.moveTo(r0,-w/2); g.lineTo(r1,0); g.lineTo(r0,w/2); g.closePath(); break;
+    case 'diamond': g.moveTo(r0,0); g.lineTo(r0+len/2,-w/2); g.lineTo(r1,0); g.lineTo(r0+len/2,w/2); g.closePath(); break;
+    case 'bar':     rr(r0,-w*.2,len,w*.4,w*.2); break;
+    case 'dot':     for (const f of [.2,.5,.8]) { g.moveTo(r0+len*f+w*.28,0); g.arc(r0+len*f,0,w*.28*(.6+f*.5),0,7); } break;
+  }
+  g.fillStyle = HS(h,55,a); g.fill();
+  // inti yang lebih terang (memberi kesan berlapis seperti referensi)
+  g.beginPath();
+  if (shape==='bar'){ g.rect(r0+len*.3,-w*.07,len*.4,w*.14); }
+  else if (shape==='dot'){ for (const f of [.2,.5,.8]) { g.moveTo(r0+len*f+w*.1,0); g.arc(r0+len*f,0,w*.1,0,7); } }
+  else g.rect(r0+len*.3,-w*.12,len*.4,w*.24);
+  g.fillStyle = HS(h+25,68,a*.8); g.fill();
+}
+function rr(x,y,w,h,r){ g.moveTo(x+r,y); g.arcTo(x+w,y,x+w,y+h,r); g.arcTo(x+w,y+h,x,y+h,r); g.arcTo(x,y+h,x,y,r); g.arcTo(x,y,x+w,y,r); g.closePath(); }
+function drawRadial(l, R, n, cx, cy, extraLen=0){
+  const r0 = l.r0*R, r1 = (l.r1 + l.energy*.12 + extraLen)*R, rm = (r0+r1)/2;
+  const w = 2*Math.PI*rm/n * l.wf * (1 + l.energy*.25);
+  const base = .3 + l.energy*.55 + M.flash*.15;
+  for (let i=0;i<n;i++){
+    const a = i/n*Math.PI*2 + l.rot + M.twist*(rm/R);
+    g.save(); g.translate(cx,cy); g.rotate(a);
+    if (l.mix < 1) petalShape(l.prev, r0, r1, w, l.hue, base*(1-l.mix));
+    petalShape(l.shape, r0, r1, w, l.hue, base*l.mix);
+    g.restore();
+  }
+}
+function drawMandala(){
+  const L = M.L, cx = W/2, cy = H/2, sym = M.sym, C = M.C;
+  const R = MIN*.36*(1 + M.pulse*.08 + beatPulse*.03 + drive*.15);
+  const vFrame = visOf('frame'), vPills = visOf('pills'), vMid = visOf('mid'), vInner = visOf('inner'), vSp = visOf('spokes'), vCore = visOf('core');
+  // halo — makin kompleks makin luas
+  const halo = g.createRadialGradient(cx,cy,R*.2,cx,cy,Math.max(R*1.4, DIAG*.55*drive*vFrame));
+  halo.addColorStop(0, HS(L.mid.hue,55,(.03+.12*C)+M.pulse*.06*C)); halo.addColorStop(.7, HS(L.frame.hue,55,.02+.07*C)); halo.addColorStop(1, HS(L.frame.hue,55,0));
+  g.fillStyle = halo; g.fillRect(0,0,W,H);
+  // bingkai kotak berputar
+  if (vFrame > .01){
+    const fr = L.frame, fe = fr.energy, k = sym/2;
+    g.globalAlpha = vFrame; g.lineWidth = R*.05;
+    for (let i=0;i<k;i++){
+      const a = i/k*Math.PI/2 + fr.rot, sz = R*(1.12 + fe*.08)*(1 + drive*.85);
+      g.save(); g.translate(cx,cy); g.rotate(a);
+      g.strokeStyle = HS(fr.hue,50,.08 + fe*.16); g.strokeRect(-sz,-sz,sz*2,sz*2);
+      g.restore();
+    }
+    g.globalAlpha = 1;
+  }
+  // kelompok kotak merah (tengah), batang magenta (luar)
+  if (vMid > .01){ g.globalAlpha = vMid; drawRadial(L.mid, R, sym, cx, cy); g.globalAlpha = 1; }
+  if (vPills > .01){ g.globalAlpha = vPills; drawRadial(L.pills, R, sym, cx, cy); g.globalAlpha = 1; }
+  // CINCIN DASAR (selalu ada): garis halus merah–kuning + segmen biru
+  const tk = L.ticks, nt = sym*14, rt = R*.92;
+  g.lineWidth = Math.max(1.2, R*.007);
+  for (let i=0;i<nt;i++){
+    const a = i/nt*Math.PI*2 + tk.rot + M.twist*.9;
+    const len = R*.085*(.55 + .45*Math.abs(Math.sin(i*1.7 + clockT*4)))*(.7 + .5*C + tk.energy*.9);
+    g.beginPath(); g.moveTo(cx+Math.cos(a)*rt, cy+Math.sin(a)*rt); g.lineTo(cx+Math.cos(a)*(rt+len), cy+Math.sin(a)*(rt+len));
+    g.strokeStyle = HS(tk.hue + (i%4===0 ? 45 : i%2 ? 0 : 20), 60, .2 + .45*C + tk.energy*.4); g.stroke();
+  }
+  const fr = L.frame, segN = sym, segW = R*.045;
+  g.lineWidth = segW; g.lineCap = 'butt';
+  for (let i=0;i<segN;i++){
+    const a0 = i/segN*Math.PI*2 + fr.rot*.6, span = Math.PI*2/segN*.4;
+    g.beginPath(); g.arc(cx,cy,R*.96,a0,a0+span);
+    g.strokeStyle = HS(fr.hue,55,.18 + .3*fr.energy + .3*C); g.stroke();
+    g.beginPath(); g.arc(cx,cy,R*.96,a0,a0+span);
+    g.strokeStyle = HS(fr.hue,55,.08); g.lineWidth = segW*2.4; g.stroke(); g.lineWidth = segW;
+  }
+  // kelopak dalam
+  if (vInner > .01){ g.globalAlpha = vInner; drawRadial(L.inner, R, sym, cx, cy); g.globalAlpha = 1; }
+  // jari-jari
+  if (vSp > .01){
+    const sp = L.spokes, len = R*(.62 + sp.energy*.15 + sp.zap*.9);
+    g.globalAlpha = vSp; g.lineCap = 'round';
+    for (let i=0;i<sym;i++){
+      const a = i/sym*Math.PI*2 + sp.rot + Math.PI/sym;
+      g.beginPath();
+      for (let st=0;st<=10;st++){ const r = R*.08 + (len-R*.08)*st/10, aa = a + M.twist*(r/R); st ? g.lineTo(cx+Math.cos(aa)*r, cy+Math.sin(aa)*r) : g.moveTo(cx+Math.cos(aa)*r, cy+Math.sin(aa)*r); }
+      g.strokeStyle = HS(sp.hue,60,.18 + sp.energy*.25); g.lineWidth = R*.035; g.stroke();
+      g.strokeStyle = HS(sp.hue+20,70,.5 + sp.energy*.45 + sp.zap*.4); g.lineWidth = R*.012; g.stroke();
+    }
+    g.globalAlpha = 1;
+  }
+  // inti bintang
+  if (vCore > .01){
+    const co = L.core, pr = co.points, ro = R*.17*(1 + co.energy*.35 + M.pulse*.15), ri = ro*.55;
+    g.globalAlpha = vCore;
+    g.save(); g.translate(cx,cy); g.rotate(co.rot);
+    g.beginPath();
+    for (let i=0;i<=pr*2;i++){ const r = i%2 ? ri : ro, a = i/(pr*2)*Math.PI*2; g.lineTo(Math.cos(a)*r, Math.sin(a)*r); }
+    g.closePath(); g.fillStyle = HS(co.hue,55,.55 + co.energy*.4); g.fill();
+    g.beginPath(); g.arc(0,0,ro*1.05,0,7); g.lineWidth = R*.025; g.strokeStyle = HS(co.hue-25,55,.5 + co.energy*.3); g.stroke();
+    g.beginPath(); g.arc(0,0,R*.035*(1+M.pulse*.5),0,7); g.fillStyle = HS(L.mid.hue,60,.9); g.fill();
+    g.restore();
+    g.globalAlpha = 1;
+  }
+}
+
+/* ---- Cahaya yang menjangkau sudut layar saat lagu sedang padat ---- */
+function drawReach(h, n, k=1){
+  const dv = drive*k;
+  if (dv < .04) return;
+  const cx = W/2, cy = H/2, L = DIAG*.62*(.25 + .75*dv), half = .055;
+  for (let i=0;i<n;i++){
+    const a = i/n*Math.PI*2 + clockT*.12;
+    const gr = g.createLinearGradient(cx,cy,cx+Math.cos(a)*L,cy+Math.sin(a)*L);
+    gr.addColorStop(0, HS(h+(i%2)*30,62,.2*dv)); gr.addColorStop(.6, HS(h+(i%2)*30,62,.08*dv)); gr.addColorStop(1, HS(h,62,0));
+    g.fillStyle = gr; g.beginPath(); g.moveTo(cx,cy);
+    g.lineTo(cx+Math.cos(a-half)*L, cy+Math.sin(a-half)*L); g.lineTo(cx+Math.cos(a+half)*L, cy+Math.sin(a+half)*L); g.closePath(); g.fill();
+  }
+  const ca = .16*Math.pow(dv,1.4);
+  [[0,0],[W,0],[0,H],[W,H]].forEach(([x,y],i)=>{
+    const gr = g.createRadialGradient(x,y,0,x,y,MIN*.75);
+    gr.addColorStop(0, HS(h+i*40,60,ca*(1+beatPulse*.6))); gr.addColorStop(1, HS(h+i*40,60,0));
+    g.fillStyle = gr; g.fillRect(0,0,W,H);
+  });
+}
+
+/* ================= Key map ================= */
+// [suara, nada, efek]
+const KEYMAP = {
+  q:['pluck',0,(h,x,y)=>new Rings(h,x,y)],
+  w:['pluck',1,(h,x,y)=>new Streaks(h,x,y)],
+  e:['pluck',2,(h,x,y)=>new Spiral(h,x,y)],
+  r:['pluck',3,(h,x,y)=>new Ribbon(h,x,y)],
+  t:['pluck',4,(h)=>new Bokeh(h)],
+  y:['pluck',5,(h,x,y)=>new Tunnel(h,x,y,4)],
+  u:['pluck',6,(h,x,y)=>new Rays(h,x,y)],
+  i:['pluck',7,(h,x,y)=>new Ribbon(h,x,y)],
+  o:['pluck',8,(h,x,y)=>new Silk(h,x,y)],
+  p:['pluck',9,(h,x,y)=>new Sparkle(h,x,y)],
+  a:['kick',0,(h,x,y)=>new Tunnel(h,x,y,3)],
+  s:['snare',0,(h,x,y)=>new Streaks(h,x,y)],
+  d:['hat',0,(h,x,y)=>new Sparkle(h,x,y)],
+  f:['clap',0,(h,x,y)=>new Rays(h,x,y)],
+  g:['tom',0,(h,x,y)=>new Rings(h,x,y)],
+  h:['openhat',0,(h,x,y)=>new Pixels(h,x,y)],
+  j:['bass',0,(h,x,y)=>new Silk(h,x,y)],
+  k:['bass',2,(h,x,y)=>new Ridge(h,x,y)],
+  l:['bass',4,(h)=>new Aurora(h)],
+  z:['bell',4,(h,x,y)=>new Spiral(h,x,y)],
+  x:['bell',7,(h)=>new Bokeh(h)],
+  c:['pad',0,(h)=>new Aurora(h)],
+  v:['pad',3,(h,x,y)=>new Ridge(h,x,y)],
+  b:['zap',0,(h)=>new Lasers(h)],
+  n:['rise',0,(h,x,y)=>new Pixels(h,x,y)],
+  m:['blip',9,(h,x,y)=>new Dashes(h,x,y)],
+  // baris angka: synth lead yang bisa ditahan
+  '1':['lead',0,(h,x,y)=>new Silk(h,x,y)],
+  '2':['lead',1,(h)=>new Aurora(h)],
+  '3':['lead',2,(h,x,y)=>new Spiral(h,x,y)],
+  '4':['lead',3,(h,x,y)=>new Ridge(h,x,y)],
+  '5':['lead',4,(h,x,y)=>new Sparkle(h,x,y)],
+  '6':['lead',5,(h,x,y)=>new Rays(h,x,y)],
+  '7':['lead',6,(h,x,y)=>new Spiral(h,x,y)],
+  '8':['lead',7,(h,x,y)=>new Silk(h,x,y)],
+};
+const SUSTAIN = new Set(['lead','bell','pad']);
+const GEOS = [
+  ['Gelombang sutra',     (h,x,y)=>new Silk(h,x,y)],
+  ['Terowongan segitiga', (h,x,y)=>new Tunnel(h,x,y,3)],
+  ['Terowongan kotak',    (h,x,y)=>new Tunnel(h,x,y,4)],
+  ['Serat cahaya',        (h,x,y)=>new Streaks(h,x,y)],
+  ['Bukit spektrum',      (h,x,y)=>new Ridge(h,x,y)],
+  ['Badai piksel',        (h,x,y)=>new Pixels(h,x,y)],
+  ['Garis putus-putus',   (h,x,y)=>new Dashes(h,x,y)],
+  ['Cincin',              (h,x,y)=>new Rings(h,x,y)],
+  ['Aurora',              (h)=>new Aurora(h)],
+  ['Sinar radial',        (h,x,y)=>new Rays(h,x,y)],
+  ['Spiral',              (h,x,y)=>new Spiral(h,x,y)],
+  ['Laser',               (h)=>new Lasers(h)],
+  ['Bokeh',               (h)=>new Bokeh(h)],
+  ['Percikan',            (h,x,y)=>new Sparkle(h,x,y)],
+  ['Pita cahaya',         (h,x,y)=>new Ribbon(h,x,y)],
+];
+let mode = 'full', geoIdx = 0;
+const KEYS = Object.keys(KEYMAP);
+let hueShift = 0;
+const keyHue = k => KEYS.indexOf(k)*137.508 + hueShift;   // golden angle → tiap tombol warna beda
+
+const fx = [];
+/* ================= Nada "cahaya penuh": cahayanya selalu sampai ke tepi layar ================= */
+const edgeFx = [];
+// sinar matahari: puluhan sinar dari tengah sampai melewati sudut
+class Sunburst extends FX { constructor(h){ super(.9); this.h=h; this.r0=rnd(0,6); }
+  draw(){ const p=this.p, a=envA(p,.04), L=DIAG*.62*(.35+.75*ease(p)), n=28, cx=W/2, cy=H/2;
+    for (let i=0;i<n;i++){ const an=this.r0+i/n*Math.PI*2+this.t*.4, hh=this.h+(i%3)*25;
+      const gr=g.createLinearGradient(cx,cy,cx+Math.cos(an)*L,cy+Math.sin(an)*L);
+      gr.addColorStop(0,HS(hh,62,.32*a)); gr.addColorStop(.7,HS(hh,60,.18*a)); gr.addColorStop(1,HS(hh,60,.07*a));
+      g.fillStyle=gr; g.beginPath(); g.moveTo(cx,cy); g.lineTo(cx+Math.cos(an-.035)*L,cy+Math.sin(an-.035)*L); g.lineTo(cx+Math.cos(an+.035)*L,cy+Math.sin(an+.035)*L); g.closePath(); g.fill(); }
+    const fl=g.createRadialGradient(cx,cy,0,cx,cy,MIN*.5); fl.addColorStop(0,`rgba(255,255,255,${.12*a*(1-p)})`); fl.addColorStop(1,'rgba(255,255,255,0)'); g.fillStyle=fl; g.fillRect(0,0,W,H); } }
+// gelombang kejut: cincin yang melebar sampai melewati sudut
+class Shock extends FX { constructor(h,n=1){ super(1.1+n*.15); this.h=h; this.n=n; }
+  draw(){ for (let j=0;j<this.n;j++){ const q=clamp((this.p-j*.12)/(1-.12*(this.n-1)),0,1); if (q<=0||q>=1) continue;
+      const r=DIAG*.62*ease(q), a=(1-q)*INT;
+      g.beginPath(); g.arc(W/2,H/2,r,0,7);
+      g.strokeStyle=HS(this.h+j*30,60,.1*a); g.lineWidth=MIN*.12; g.stroke();
+      glow(HS(this.h+j*30,62),3*(1-q)+1.2,a*.9,false); } } }
+// cahaya warna dari tepi layar (vignette terbalik) — bisa ditahan
+class Wash extends FX { constructor(h){ super(2.4); this.h=h; }
+  draw(){ const a=envA(this.p,.15), cx=W/2, cy=H/2, gr=g.createRadialGradient(cx,cy,MIN*.25,cx,cy,DIAG*.55);
+    gr.addColorStop(0,HS(this.h,55,0)); gr.addColorStop(.6,HS(this.h,55,.14*a)); gr.addColorStop(1,HS(this.h+40+Math.sin(this.t)*20,58,.42*a));
+    g.fillStyle=gr; g.fillRect(0,0,W,H); } }
+// banjir cahaya: layar terang + sorot berputar ke sudut — bisa ditahan
+class Flood extends FX { constructor(h){ super(1.8); this.h=h; }
+  draw(){ const a=envA(this.p,.08), cx=W/2, cy=H/2, gr=g.createRadialGradient(cx,cy,0,cx,cy,DIAG*.55);
+    gr.addColorStop(0,HS(this.h,62,.16*a)); gr.addColorStop(1,HS(this.h+50,58,.14*a)); g.fillStyle=gr; g.fillRect(0,0,W,H);
+    const L=DIAG*.62, n=10;
+    for (let i=0;i<n;i++){ const an=i/n*Math.PI*2+this.t*.5, g2=g.createLinearGradient(cx,cy,cx+Math.cos(an)*L,cy+Math.sin(an)*L);
+      g2.addColorStop(0,HS(this.h+(i%2)*40,68,.35*a)); g2.addColorStop(1,HS(this.h+(i%2)*40,62,.1*a));
+      g.fillStyle=g2; g.beginPath(); g.moveTo(cx,cy); g.lineTo(cx+Math.cos(an-.07)*L,cy+Math.sin(an-.07)*L); g.lineTo(cx+Math.cos(an+.07)*L,cy+Math.sin(an+.07)*L); g.closePath(); g.fill(); } } }
+// denyut tepi: keempat tepi layar menyala sebentar
+class EdgePulse extends FX { constructor(h){ super(.55); this.h=h; }
+  draw(){ const a=envA(this.p,.06)*.22, d=MIN*.3;
+    [[0,0,0,d,0,0,W,d],[0,H,0,H-d,0,H-d,W,d],[0,0,d,0,0,0,d,H],[W,0,W-d,0,W-d,0,d,H]].forEach(([x0,y0,x1,y1,rx,ry,rw,rh],i)=>{
+      const gr=g.createLinearGradient(x0,y0,x1,y1); gr.addColorStop(0,HS(this.h+i*20,60,a)); gr.addColorStop(1,HS(this.h+i*20,60,0));
+      g.fillStyle=gr; g.fillRect(rx,ry,rw,rh); }); } }
+// sapuan sorot: 4 sorot dari tengah berputar cepat melintasi layar
+class Scan extends FX { constructor(h){ super(1.0); this.h=h; this.r0=rnd(0,6); this.dir=pick([-1,1]); }
+  draw(){ const a=envA(this.p,.05), L=DIAG*.65, cx=W/2, cy=H/2;
+    for (let i=0;i<4;i++){ const an=this.r0+i*Math.PI/2+this.dir*easeIO(this.p)*Math.PI;
+      g.beginPath(); g.moveTo(cx,cy); g.lineTo(cx+Math.cos(an)*L,cy+Math.sin(an)*L);
+      g.strokeStyle=HS(this.h+i*25,60,.06*a); g.lineWidth=70; g.stroke(); glow(HS(this.h+i*25,62),3,a); } } }
+// tombol → efek cahaya penuh
+const EDGE = {
+  a:h=>new EdgePulse(h),          // kick: tepi layar berdenyut
+  f:h=>new Sunburst(h),           // clap
+  m:h=>new Sunburst(h),           // stab
+  b:h=>new Scan(h),               // laser
+  o:h=>new Shock(h,1), p:h=>new Shock(h,2),   // clav tertinggi
+  n:h=>new Shock(h,3),            // string run
+  '7':h=>new Flood(h), '8':h=>new Flood(h),   // lead tertinggi (bisa ditahan)
+  c:h=>new Wash(h), v:h=>new Wash(h),         // string (bisa ditahan)
+};
+function spawnEdge(key, h, hold, kind){
+  const mk = EDGE[key]; if (!mk) return null;
+  const e = mk(h); e.bright = Math.max(.8, brightOf(kind, KEYMAP[key][1]));
+  if (hold && SUSTAIN.has(kind)) e.held = true;
+  edgeFx.push(e); while (edgeFx.length > 16){ const i = edgeFx.findIndex(q=>!q.held); edgeFx.splice(i<0?0:i,1); }
+  return e;
+}
+let hazeHue = 280, hazeTarget = 280, activity = 0;
+function trigger(key, x, y, hold=false){
+  const m = KEYMAP[key]; if (!m) return null;
+  if (AC && AC.state==='suspended') AC.resume();
+  const r = AC ? SOUNDS[m[0]](m[1]) : null;
+  const h = keyHue(key);
+  if (mode==='spiral'){
+    // mode Spiral: tidak memunculkan efek baru — tombol mengubah mandala di tengah
+    const br = brightOf(m[0], m[1]); noteAcc += br;
+    const o = mandalaHit(m[0], m[1], h, br, key);
+    if (hold && SUSTAIN.has(m[0])){ o.held = true; M.holds.push(o); }
+    hazeTarget = h; activity = Math.min(1.5, activity + .2);
+    registerTap(window.__now ?? performance.now());
+    const eo = spawnEdge(key, h, hold, m[0]);
+    return { rel: typeof r==='function' ? r : null, f:o, e:eo };
+  }
+  const accent = density==='calm' && ACCENT[m[0]];
+  const make = accent || (mode==='mono' ? GEOS[geoIdx][1] : m[2]);
+  const f = make(h, x, y);
+  f.bright = brightOf(m[0], m[1]); noteAcc += f.bright;
+  if (hold && SUSTAIN.has(m[0])) f.held = true;
+  fx.push(f);
+  f.major = !accent;
+  if (density==='calm' && f.major){
+    // geometri besar maksimal MAX_MAJOR; yang paling lama dipudarkan lebih cepat
+    const live = fx.filter(q=>q.major && !q.held && !q.fading && q!==f);
+    const heldN = fx.filter(q=>q.major && q.held && q!==f).length;
+    let over = live.length + heldN + 1 - MAX_MAJOR;
+    for (let i=0; i<live.length && over>0; i++, over--) live[i].fading = true;
+  }
+  while (fx.length > 45){ const i = fx.findIndex(q=>!q.held); fx.splice(i<0?0:i, 1); }
+  hazeTarget = h; activity = Math.min(1.5, activity + .35);
+  registerTap(performance.now());
+  const eo = spawnEdge(key, h, hold, m[0]);
+  return { rel: typeof r==='function' ? r : null, f, e:eo };
+}
+// nada yang sedang ditahan (keyboard & sentuhan)
+const holds = {};
+function press(id, key, x, y){ releaseHold(id); const r = trigger(key, x, y, true); if (r) holds[id] = r; }
+function releaseHold(id){ const r = holds[id]; if (!r) return; if (r.rel) r.rel(); r.f.held = false; if (r.e) r.e.held = false; delete holds[id]; }
+function releaseAll(){ Object.keys(holds).forEach(releaseHold); }
+
+/* ================= Mode visual ================= */
+const mFull=document.getElementById('mFull'), mMono=document.getElementById('mMono'), geoSel=document.getElementById('geoSel');
+GEOS.forEach(([n],i)=>{ const o=document.createElement('option'); o.value=i; o.textContent=n; geoSel.appendChild(o); });
+const mSpiral=document.getElementById('mSpiral');
+function setMode(m){ mode=m; mFull.classList.toggle('on',m==='full'); mMono.classList.toggle('on',m==='mono'); mSpiral.classList.toggle('on',m==='spiral'); geoSel.classList.toggle('hide',m!=='mono'); }
+mSpiral.addEventListener('click', e=>{ e.stopPropagation(); setMode('spiral'); });
+function setGeo(i){ geoIdx=(i+GEOS.length)%GEOS.length; geoSel.value=geoIdx; setMode('mono'); }
+mFull.addEventListener('click', e=>{ e.stopPropagation(); setMode('full'); });
+mMono.addEventListener('click', e=>{ e.stopPropagation(); setMode('mono'); });
+geoSel.addEventListener('change', ()=>{ geoIdx=+geoSel.value; geoSel.blur(); });
+const dCalm=document.getElementById('dCalm'), dBusy=document.getElementById('dBusy');
+function setDensity(d){ density=d; dCalm.classList.toggle('on',d==='calm'); dBusy.classList.toggle('on',d==='busy'); }
+dCalm.addEventListener('click', e=>{ e.stopPropagation(); setDensity('calm'); });
+dBusy.addEventListener('click', e=>{ e.stopPropagation(); setDensity('busy'); });
+geoSel.addEventListener('keydown', e=>e.preventDefault());
+
+/* ================= Input ================= */
+const held = new Set();
+// pakai e.code supaya Shift+angka tetap terbaca sebagai angka
+const keyOf = e => e.code.startsWith('Key') ? e.code.slice(3).toLowerCase() : e.code.startsWith('Digit') ? e.code.slice(5) : e.key.toLowerCase();
+addEventListener('keydown', e => {
+  const k = keyOf(e);
+  if (e.code==='Space'){ e.preventDefault(); hueShift += 47; return; }
+  if (e.shiftKey && k==='f'){ toggleFS(); return; }
+  if (e.shiftKey && k==='h'){ document.body.classList.toggle('clean'); return; }
+  if (e.shiftKey && k==='m'){ setMode(mode==='full'?'mono':mode==='mono'?'spiral':'full'); return; }
+  if (e.shiftKey && k==='d'){ setDensity(density==='calm'?'busy':'calm'); return; }
+  if (e.code==='BracketLeft'){ setGeo(geoIdx-1); return; }
+  if (e.code==='BracketRight'){ setGeo(geoIdx+1); return; }
+  if (e.metaKey||e.ctrlKey||e.altKey) return;
+  if (KEYMAP[k]){ e.preventDefault(); if (e.repeat || held.has(k)) return; held.add(k); press('k'+k, k); }
+});
+addEventListener('keyup', e => { const k = keyOf(e); held.delete(k); releaseHold('k'+k); });
+addEventListener('blur', () => { held.clear(); releaseAll(); });
+cv.addEventListener('pointerdown', e => {
+  const cols=7, rows=5;
+  const ci=Math.min(cols-1,Math.floor(e.clientX/W*cols)), ri=Math.min(rows-1,Math.floor(e.clientY/H*rows));
+  try{ cv.setPointerCapture(e.pointerId); }catch(_){}
+  press('p'+e.pointerId, KEYS[(ri*cols+ci)%KEYS.length], e.clientX, e.clientY);
+});
+['pointerup','pointercancel'].forEach(t=>cv.addEventListener(t, e=>releaseHold('p'+e.pointerId)));
+function toggleFS(){ try{ if(!document.fullscreenElement) document.documentElement.requestFullscreen().catch(()=>{}); else document.exitFullscreen().catch(()=>{}); }catch(_){} }
+document.getElementById('fsBtn').addEventListener('click', e=>{ e.stopPropagation(); toggleFS(); });
+document.getElementById('hueBtn').addEventListener('click', e=>{ e.stopPropagation(); hueShift += 47; });
+document.getElementById('cleanBtn').addEventListener('click', e=>{ e.stopPropagation(); document.body.classList.toggle('clean'); });
+const startEl = document.getElementById('start');
+startEl.addEventListener('click', ()=>{ try{ initAudio(); AC.resume(); }catch(_){} startEl.classList.add('hide'); });
+
+/* ================= Loop ================= */
+const haze = [...Array(3)].map((_,i)=>({x:rnd(.2,.8), y:rnd(.3,.7), vx:rnd(-.02,.02), vy:rnd(-.015,.015), r:rnd(.35,.55), o:i*40}));
+let last = performance.now();
+const bpmEl=document.getElementById('bpm'), beatEl=document.getElementById('beat');
+function frame(now){
+  const rawDt=Math.min(.05,(now-last)/1000); last=now;
+  const lastTap=taps[taps.length-1]||0;
+  if (now-lastTap>4000){ targetSpeed=1; if (now-lastTap>6000) bpm=0; }
+  speed += (targetSpeed-speed)*Math.min(1,rawDt*3);
+  const dt=rawDt*speed;
+  if (bpm){ beatPhase += rawDt*bpm/60; if (beatPhase>=1){ beatPhase-=Math.floor(beatPhase); beatPulse=1; } }
+  beatPulse *= Math.pow(.02, rawDt);
+  activity *= Math.pow(.4, rawDt);
+  let dh = ((hazeTarget-hazeHue)%360+540)%360-180; hazeHue += dh*Math.min(1,rawDt*2);
+
+  // jejak cahaya (motion trail)
+  g.globalCompositeOperation='source-over';
+  g.fillStyle=`rgba(4,3,12,${1-Math.pow(density==='calm'?.7:.8, rawDt*60)})`;
+  g.fillRect(0,0,W,H);
+
+  g.globalCompositeOperation='lighter';
+  // kabut ambient — warnanya mengikuti tombol terakhir, berdenyut di beat
+  for (const z of haze){
+    z.x+=z.vx*dt; z.y+=z.vy*dt; if (z.x<.1||z.x>.9) z.vx*=-1; if (z.y<.2||z.y>.8) z.vy*=-1;
+    const r=z.r*DIAG*.5, gr=g.createRadialGradient(z.x*W,z.y*H,0,z.x*W,z.y*H,r);
+    gr.addColorStop(0, HS(hazeHue+z.o,50, (.035+beatPulse*.05+activity*.025)*(mode==='spiral' ? .3+.7*M.C : 1))); gr.addColorStop(1, HS(hazeHue+z.o,50,0));
+    g.fillStyle=gr; g.fillRect(0,0,W,H);
+  }
+  INT += (Math.min(1, 2.4/Math.sqrt(fx.length+1)) - INT) * Math.min(1, rawDt*4);
+  clockT += dt;
+  updateMandala(dt, rawDt);
+  // intensitas: laju nada (berbobot kecerahan) → 0..1; nada yang ditahan ikut menyumbang
+  for (const o of M.holds) noteAcc += 1.2*o.br*rawDt;
+  for (const f of fx) if (f.held) noteAcc += 1.2*(f.bright||1)*rawDt;
+  noteAcc *= Math.exp(-rawDt/DRIVE_TAU);
+  const dTarget = clamp((noteAcc/DRIVE_TAU - 2.5)/3.5, 0, 1);
+  drive += (dTarget - drive) * Math.min(1, rawDt*(dTarget>drive ? 1.2 : .6));
+  if (mode==='spiral'){
+    // latar tidak gelap total: pendaran warna dari tepi layar, makin kuat saat permainan makin kompleks
+    const bg = g.createRadialGradient(W/2,H/2,MIN*.3,W/2,H/2,DIAG*.55), bh = M.L.frame.hue;
+    bg.addColorStop(0,HS(bh,50,0)); bg.addColorStop(1,HS(bh+30,55,.22*Math.pow(M.C,1.3) + beatPulse*.04*M.C));
+    g.fillStyle = bg; g.fillRect(0,0,W,H);
+  }
+  // makin banyak cahaya penuh bertumpuk, masing-masing diredam supaya layar tidak putih total
+  // di mode Spiral, cahaya penuh ikut kompleksitas: redup saat permainan masih sepi, terang saat sudah kompleks
+  const edgeK = Math.min(1, 1.5/Math.sqrt(Math.max(1, edgeFx.length))) * (mode==='spiral' ? .18 + .82*smooth01(M.C/.75) : 1);
+  for (let i=edgeFx.length-1;i>=0;i--){
+    const e=edgeFx[i]; e.t+=dt;
+    if (!(e.held && e.pt >= e.life*PLATEAU)) e.pt+=dt;
+    if (e.pt>=e.life){ edgeFx.splice(i,1); continue; }
+    const baseINT=INT; INT=e.bright*edgeK; g.save(); e.draw(); g.restore(); INT=baseINT;
+  }
+  drawReach(mode==='spiral' ? M.L.frame.hue : hazeHue, mode==='spiral' ? M.sym : 12, mode==='spiral' ? Math.max(reveal(.42)*.7, reveal(REVEAL.frame)) : 1);
+  if (mode==='spiral') drawMandala();
+  for (let i=fx.length-1;i>=0;i--){
+    const f=fx[i]; f.t+=dt;
+    if (f.fading){ f.pt = Math.max(f.pt, f.life*PLATEAU) + dt*2.5; }
+    else if (!(f.held && f.pt >= f.life*PLATEAU)) f.pt+=dt;
+    if (f.pt>=f.life){ fx.splice(i,1); continue; }
+    const baseINT = INT; INT = baseINT*(f.bright ?? 1);
+    g.save(); f.draw(); g.restore();
+    INT = baseINT;
+  }
+  g.globalCompositeOperation='source-over';
+
+  bpmEl.textContent = bpm?Math.round(bpm):'—';
+  beatEl.style.opacity = bpm?(.25+beatPulse*.75).toFixed(2):.15;
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+// untuk pengujian otomatis
+window.__trigger = trigger;
+})();
+</script>
+</body>
+</html>
